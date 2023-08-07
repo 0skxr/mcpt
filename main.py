@@ -9,7 +9,7 @@ ti.init(arch=ti.opengl)
 
 vec3 = ti.math.vec3
 
-entity = Entity().from_file("ffp\\test.vox")
+entity = Entity().from_file("ffp\\tree.vox")
 
 print(entity.get(1,1,1))
 
@@ -58,27 +58,36 @@ class hit:
     d: ti.types.f32
     cord: tm.vec3
     normal: vec3
+    xyz: vec3
 
 
 @ti.func
 def ray_color(ray_origin, ray_direction):
     t = 0.5 * (tm.normalize(ray_direction).y + 1)
-    return (((1.0 - t) * tm.vec3(1,1,1) + t * tm.vec3(0.5, 0.7, 1.0))) / 2
+    return (((1.0 - t) * tm.vec3(1,1,1) + t * tm.vec3(0.5, 0.7, 1.0))) 
+    #return vec3(0)
 
 @ti.func
 def random_in_unit_sphere():
-  theta = 2.0 * 3.14 * ti.random()
-  phi = ti.acos((2.0 * ti.random()) - 1.0)
-  r = ti.pow(ti.random(), 1.0 / 3.0)
-  return ti.Vector([r * ti.sin(phi) * ti.cos(theta), r * ti.sin(phi) * ti.sin(theta), r * ti.cos(phi)]) 
+    theta = 2.0 * 3.14 * ti.random()
+    phi = ti.acos((2.0 * ti.random()) - 1.0)
+
+    # Cosine-weighting factor
+    cos_weight = ti.sqrt(ti.random())  
+
+    r = ti.pow(ti.random(), 1.0 / 3.0)
+    return ti.Vector([r * cos_weight * ti.sin(phi) * ti.cos(theta), 
+                      r * cos_weight * ti.sin(phi) * ti.sin(theta), 
+                      r * ti.cos(phi)])
+
 
 
 
 eps = 1e-4
 inf = 1e10
 
-image_width = 1220
-image_height = 720
+image_width = 512
+image_height = 512
 
 aspect = image_width/image_height
 
@@ -93,7 +102,7 @@ lower_left_corner = origin - horizontal / 2 - vertical / 2 - tm.vec3(0, 0, focal
 
 texture = ti.field(dtype=tm.vec3, shape=(48, 16))
 
-img = im.open('ffp\sand.png')
+img = im.open('ffp\\blocks\\emerald_block.png')
 rgb_im = img.convert('RGB')
 
 for x in range(16):
@@ -102,7 +111,7 @@ for x in range(16):
         texture[x,y] = vec3(r,g,b) / 255
         
 
-img = im.open('ffp\sand_s.png')
+img = im.open('ffp\\blocks\\emerald_block_mer.png')
 rgb_im = img.convert('RGB')
 
 for x in range(16):
@@ -142,7 +151,7 @@ for x in range(xmax):
     for y in range(ymax):
         for z in range(zmax):
             if(entity.get(x,y,z) != 0):
-                chunk[x,z,y] = 1
+                chunk[x,z,y] = random.randint(1,10)
                 #f = vec3(palette[entity.get(x,y,z)._color][0],palette[entity.get(x,y,z)._color][1],palette[entity.get(x,y,z)._color][2])/255
                 #color[x,z,y] = f
                 print(str(x) + " " + str(y) + " " + str(z))
@@ -213,7 +222,7 @@ def intersection(o, d):
     else:
         D = 0
 
-    return hit(cord=o+d*(D-0.001), d=D, normal=get_normal((o+d*D)-vec3(X,Y,Z)))
+    return hit(cord=o+d*(D-0.001), d=D, normal=get_normal((o+d*D)-vec3(X,Y,Z)),xyz=vec3(X,Y,Z))
 
 @ti.func
 def get_normal(surface_normal):
@@ -235,12 +244,13 @@ final = ti.field(dtype=tm.vec3, shape=(image_width, image_height))
 
 albedo = ti.field(dtype=tm.vec3, shape=(image_width, image_height))
 specular = ti.field(dtype=tm.vec3, shape=(image_width, image_height))#
+specular_buff = ti.field(dtype=tm.vec3, shape=(image_width, image_height))#
 normals = ti.field(dtype=tm.vec3, shape=(image_width, image_height))
 depth = ti.field(dtype=tm.vec3, shape=(image_width, image_height))
 diffuse = ti.field(dtype=tm.vec3, shape=(image_width, image_height))
 hit_point = ti.field(dtype=tm.vec3, shape=(image_width, image_height))
 sky = ti.field(dtype=tm.vec3, shape=(image_width, image_height))#
-
+rd = ti.field(dtype=tm.vec3, shape=(image_width, image_height))#
 @ti.func
 def texture_map(cord, normal,offset,spec):
     x = int(ti.round(cord.x))
@@ -273,15 +283,19 @@ def texture_map(cord, normal,offset,spec):
 def gbuff(o,d,i,j):
     hitrecord = intersection(o=o, d=d)
     if hitrecord.d > 0 and hitrecord.d != inf:
+        x = int(hitrecord.xyz.x)
+        y = int(hitrecord.xyz.y)
+        z = int(hitrecord.xyz.z)
         normal = hitrecord.normal
         albedo[i,j] = texture_map(hitrecord.cord,normal,0,False)
         specular[i,j] = texture_map(hitrecord.cord,normal,16,False)
 
+        #albedo[i,j] = (chunk[x,y,z]==3)/5
         normals[i,j] = normal
         depth[i,j] = hitrecord.d 
         hit_point[i,j] = hitrecord.cord
     else:
-        c = ray_color(ray_origin=o, ray_direction=d)  
+        c = 0  
         depth[i, j] = vec3(0)
         normals[i, j] = vec3(0)
         albedo[i,j] = vec3(inf)
@@ -323,6 +337,11 @@ def lambertian_brdf(incoming_direction, outgoing_direction, surface_normal, diff
 
     return brdf_value
 
+
+
+
+
+
     
 @ti.func
 def render_diffuse(o, d, i, j):
@@ -334,34 +353,31 @@ def render_diffuse(o, d, i, j):
     if tm.dot(normal, r) < 0:
         r = r - 2 * tm.dot(normal, r) * normal
     roughness = tm.pow(1 - spec, 2)
-    d = r * (roughness) + (tm.reflect(x=d,n=normal) * (1-roughness))
+    d = r #* (roughness) + (tm.reflect(x=d,n=normal) * (1-roughness))
     d = tm.normalize(d)
     if(depth[i,j].x > 0):
-        for b in range(100):
-            if(b == 99):
+        for b in range(10):
+            if(b == 9):
                 c = vec3(0) 
             else:
                 hitrecord = intersection(o=o, d=d)
                 if hitrecord.d > 0 and hitrecord.d != inf:
-                    x = int(ti.round(hitrecord.cord.x))
-                    y = int(ti.round(hitrecord.cord.y))
-                    z = int(ti.round(hitrecord.cord.z))
+                    x = int(hitrecord.xyz.x)
+                    y = int(hitrecord.xyz.y)
+                    z = int(hitrecord.xyz.z)
                     f = vec3(x - hitrecord.cord.x + 0.5, y - hitrecord.cord.y + 0.5, z - hitrecord.cord.z + 0.5) * 16
                     nc = texture_map(hitrecord.cord,normal,0,False)
-                    id = d
-                    spec = texture_map(hitrecord.cord,normal,16,False).x
+                    mer = texture_map(hitrecord.cord,normal,16,False)
                     normal = hitrecord.normal                    
                     o = hitrecord.cord + (normal * 0.02)  # Move the origin to the hit point
                     r = random_in_unit_sphere()
+                    d = r  
                     if tm.dot(normal, r) < 0:
                         r = r - 2 * tm.dot(normal, r) * normal
-                    roughness = tm.pow(1 - spec, 2)
-                    d = r  * (1-roughness)  + (tm.reflect(x=d,n=normal) * (1-roughness))
                     d = tm.normalize(d)
-                    c = c * (nc * lambertian_brdf(incoming_direction=id,outgoing_direction=d,surface_normal=normal,diffuse_reflectance=roughness))
-
+                    c = c * (nc * (1+mer.y*16))
                 else:
-                    c = c * (ray_color(ray_origin=o,ray_direction=d)* lambertian_brdf(incoming_direction=id,outgoing_direction=d,surface_normal=normal,diffuse_reflectance=roughness))
+                    c = c * (ray_color(ray_origin=o,ray_direction=d)) # * lambertian_brdf(incoming_direction=id,outgoing_direction=d,surface_normal=normal,diffuse_reflectance=roughness))
                     break
     else:
         c = vec3(0)
@@ -371,37 +387,56 @@ def render_diffuse(o, d, i, j):
 def render_specular(o, d, i, j):
     c = vec3(1)
     normal = normals[i, j]
-    o = hit_point[i,j]
-    d = tm.reflect(x=d,n=normal*-1)
+    o = hit_point[i,j] + (normal * 0.02)
+    r = random_in_unit_sphere()
+    if tm.dot(normal, r) < 0:
+        r = r - 2 * tm.dot(normal, r) * normal
+    d = tm.reflect(n=tm.normalize(normal),x=d)
+    d = d*(1-specular[i,j].z) + r*specular[i,j].z
+    d = tm.normalize(d)
     if(depth[i,j].x > 0):
-        for b in range(1):
-            hitrecord = intersection(o=o, d=d)
-            if hitrecord.d > 0 and hitrecord.d != inf:
-                if(b == 1):
-                    c = vec3(0)
-                else:
-                    x = int(ti.round(hitrecord.cord.x))
-                    y = int(ti.round(hitrecord.cord.y))
-                    z = int(ti.round(hitrecord.cord.z))
-                    normal = hitrecord.normal       
-                    f = vec3(x - hitrecord.cord.x + 0.5, y - hitrecord.cord.y + 0.5, z - hitrecord.cord.z + 0.5) * 16
-                    o = hitrecord.cord  + (normal*0.1)  # Move the origin to the hit point
-                    d = tm.reflect(x=d,n=normal)
-                    c = c * (texture[int(f.x), int(f.y)])
-                    
+        for b in range(10):
+            if(b == 9):
+                c = vec3(0)
             else:
-                c = c * (ray_color(ray_origin=o,ray_direction=d)/2)
-                break
+                hitrecord = intersection(o=o, d=d)
+                if hitrecord.d > 0 and hitrecord.d != inf:
+                    x = int(hitrecord.xyz.x)
+                    y = int(hitrecord.xyz.y)
+                    z = int(hitrecord.xyz.z)
+                    f = vec3(x - hitrecord.cord.x + 0.5, y - hitrecord.cord.y + 0.5, z - hitrecord.cord.z + 0.5) * 16
+                    nc = texture_map(hitrecord.cord,normal,0,False)
+                    id = d
+                    mer = texture_map(hitrecord.cord,normal,16,False)
+                    normal = hitrecord.normal                    
+                    o = hitrecord.cord + (normal * 0.02)  # Move the origin to the hit point
+                    r = random_in_unit_sphere()
+                    d = r  #* (1-roughness)  + (tm.reflect(x=d,n=normal) * (1-roughness))
+                    if tm.dot(normal, r) < 0:
+                        r = r - 2 * tm.dot(normal, r) * normal
+                    d = tm.normalize(d)
+                    c = c * (nc * (1+mer.y*16)) # lambertian_brdf(incoming_direction=id,outgoing_direction=d,surface_normal=normal,diffuse_reflectance=roughness))
+                else:
+                    c =  c * (ray_color(ray_origin=o,ray_direction=d)) # * lambertian_brdf(incoming_direction=id,outgoing_direction=d,surface_normal=normal,diffuse_reflectance=roughness))
+                    break
     else:
         c = vec3(0)
     return c
+
 
 
 vel = ti.field(dtype=tm.vec3, shape=(image_width, image_height))#
 last = ti.field(dtype=tm.vec3, shape=(image_width, image_height))#
 test = ti.field(dtype=tm.vec3, shape=(image_width, image_height))#
 
-
+@ti.func
+def ACESFilm(x):
+    a = 2.51
+    b = 0.03
+    c = 2.43
+    d = 0.59
+    e = 0.14
+    return tm.clamp((x*(a*x + b)) / (x*(c*x + d) + e), 0.0, 1.0)
 
 @ti.kernel
 def paint(o: vec3,w: int, rot: vec3):
@@ -417,22 +452,36 @@ def paint(o: vec3,w: int, rot: vec3):
         v = j / (image_height - 1)
         d =  lower_left_corner + u * horizontal + v * vertical 
         d = rot_matrix @ d
+        rd[i,j] = d
         gbuff(o=o,d=d,i=i,j=j)
         dif = vec3(0)
-        for sa in range(6):
+        specdif =vec3(0)
+        for sa in range(2):
             dif += render_diffuse(o,d,i,j) 
-            diffuse[i,j] = render_specular(o,d,i,j) * 0.0 + (dif / 6)
+            specdif += render_specular(o,d,i,j)
+        diffuse[i,j] =  (dif /2) 
+        specular_buff[i,j] = (specdif/2)
         c = vec3(0)
         if (normals[i,j].x == 0 and normals[i,j].y == 0 and normals[i,j].z == 0):
             c = ray_color(ray_direction=d,ray_origin=o)
-        sky[i,j] = c/2
+            specular_buff[i,j] = vec3(0)
+        
+        sky[i,j] = c
+        
         
     for i, j in pixels:
-        pixels[i,j] = ((albedo[i,j] * diffuse[i,j]) + last[i,j]) / 2 + sky[i,j]
+        if(albedo[i,j].x  > 1.99888 and not (normals[i,j].x == 0 and normals[i,j].y == 0 and normals[i,j].z == 0)):
+            pixels[i,j] = albedo[i,j]
+        else:
+            inc = tm.clamp(tm.cos(ti.abs(tm.dot(rd[i,j],normals[i,j]))),0.0,1.0)
+            pixels[i,j] = (albedo[i,j] * (diffuse[i,j]* (1-inc) + specular_buff[i,j]*inc)) + last[i,j] / 2 + sky[i,j] + (albedo[i,j]*specular[i,j].y*2)
+            #pixels[i,j] =vec3(inc)
     
     for i, j in last:
         last[i,j] = pixels[i,j]
     
+    for i, j in pixels:
+        pixels[i,j] = ACESFilm(pixels[i,j]*0.5)
 gui = ti.GUI("render", res=(image_width, image_height),fast_gui=True)
 diffuse_gui = ti.GUI("diffuse", res=(image_width, image_height),fast_gui=True)
 
@@ -460,6 +509,6 @@ while gui.running:
     paint(origin,w=w+1,rot=rot)
     gui.set_image(pixels)
     gui.show()
-    diffuse_gui.set_image(diffuse)
+    diffuse_gui.set_image(specular_buff)
     diffuse_gui.show()
     w += 1
