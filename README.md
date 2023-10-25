@@ -6,10 +6,11 @@ This is the main repo for the mcpt project, a realtime path tracer for Minecraft
 
 To run mcpt, you will need the following prerequisites:
 
-- Taichi (preferably a graphics card)
+- Taichi 
 - Python
 - Pillow (PIL)
 - requests (for communication with Minecraft)
+- a Graphics Card
 
 To enable mcpt to gather real-time data from Minecraft, you need to install a compatible Minecraft mod. This mod creates an interface through which mcpt can communicate with Minecraft.
 
