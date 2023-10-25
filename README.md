@@ -30,10 +30,6 @@ Make sure Minecraft is running with the mod installed and active in the backgrou
 
 You can customize the parameters defined in the `mcpt.py` file to adjust the behavior of the path tracer. Note that performance and rendering results depend on these settings.
 
-## License
-
-This project is licensed under the MIT License. For more information, please see the LICENSE file.
-
 ## Authors
 
 - 0skxr
