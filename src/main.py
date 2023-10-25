@@ -44,10 +44,8 @@ class hit:
 def ray_color(ray_origin, ray_direction):
 	t = 0.5 * (tm.normalize(ray_direction).y + 1)
 	sky_color = (1.0 - t) * tm.vec3(1, 1, 1) + t * tm.vec3(0.5, 0.7, 1.0)
-	# sundot = (tm.clamp(tm.dot(ray_direction,vec3(0,0.5,-1)),-1.0,1.0))
-	#sundot = tm.log(sundot)
 	sun = vec3(0) 
-	sun_pos = vec3(0,0.5,-1)  * 100
+	sun_pos = vec3(0,0.3,-1) * 100
 	sun = sky_color * 0.5
 	for i in range(63):
 		v_pos = ray_direction * (i*2)
@@ -65,8 +63,8 @@ def ray_color(ray_origin, ray_direction):
 eps = 1e-4
 inf = 1e10
 
-image_width = 853
-image_height = 480
+image_width = 1280
+image_height = 720
 
 aspect = image_width/image_height
 
@@ -407,6 +405,8 @@ last = ti.field(dtype=tm.vec3, shape=(image_width, image_height))#
 test = ti.field(dtype=tm.vec3, shape=(image_width, image_height))#
 texture = ti.field(dtype=tm.vec4, shape=(512, 16,5))
 
+acc_buff = ti.field(dtype=tm.vec3, shape=(image_width, image_height))#
+
 @ti.func
 def ACESFilm(x):
 	a = 2.51
@@ -433,7 +433,7 @@ def hash1(seed):
 	return tm.fract(tm.sin(seed) * 43758.5453123)
 
 @ti.kernel
-def paint(o: vec3,w: int, rot: vec3, last_origin: vec3):
+def paint(o: vec3,w: int, rot: vec3, last_origin: vec3,acc: int):
 	
  
 	angle_yaw = rot.x
@@ -474,9 +474,9 @@ def paint(o: vec3,w: int, rot: vec3, last_origin: vec3):
 		gbuff(o=o,d=d,i=i,j=j)
 		dif = vec3(0)
 		specdif =vec3(0)
-		for sa in range(256):
+		for sa in range(2):
 			dif += render_diffuse(o,d,i,j) 
-		diffuse[i,j] =  (dif / 256)
+		diffuse[i,j] =  (dif / 2)
 		c = vec3(0)
 		if (normals[i,j].x == 0 and normals[i,j].y == 0 and normals[i,j].z == 0):
 			c = ray_color(ray_direction=d,ray_origin=o)
@@ -487,9 +487,16 @@ def paint(o: vec3,w: int, rot: vec3, last_origin: vec3):
 	for i, j in pixels:
 		pixels[i,j] = (albedo[i,j] * diffuse[i,j]*ref[i,j])+(diffuse[i,j]*(1-ref[i,j])) + sky[i,j]
 	for i, j in pixels:
-		pixels[i,j] = LinearToSRGB(ACESFilm(pixels[i,j]*0.5) )
+		pixels[i,j] = ACESFilm(pixels[i,j])
 		pixels[i,j] = (buff[i,j] + pixels[i,j])/2
 		buff[i,j] = pixels[i,j]
+	for i, j in acc_buff:	
+		if(acc == 1):
+			acc_buff[i,j] = acc_buff[i,j] + pixels[i,j]
+			pixels[i,j] = acc_buff[i,j] / w
+		else:
+			acc_buff[i,j] = pixels[i,j]
+	
 		
 		
 		
@@ -571,7 +578,7 @@ for i in range(16):
 			
 			
 			
-			
+acc = 0
 while gui.running:
 	vr = requests.get(url="http://127.0.0.1:2008/data")
 	vr.close()
@@ -579,10 +586,15 @@ while gui.running:
 	origin.x = float(data["x"]) - offx - 0.5
 	origin.y = float(data["y"]) + 1.63 -offy - 0.5
 	origin.z = float(data["z"]) - offz - 0.5
+	if(last_origin.x == origin.x and last_origin.y == origin.y and last_origin.z == origin.z):
+		acc = 1
+	else:
+		acc = 0
+		w = 1
 	rot.x = (float(data["yaw"])) * (3.14159 / 180)  + (180 * (3.14159 / 180))
 	rot.y = (float(data["pitch"]))  * (3.14159 / 180)
 	rot.z = (float(data["roll"]))
-	paint(origin,w=w+1,rot=rot,last_origin=last_origin)
+	paint(origin,w=w,rot=rot,last_origin=last_origin, acc=acc)
 	gui.set_image(test)
 	gui.show()
 	diffuse_gui.set_image(pixels)
