@@ -13,6 +13,8 @@ To run mcpt, you will need the following prerequisites:
 
 To enable mcpt to gather real-time data from Minecraft, you need to install a compatible Minecraft mod. This mod creates an interface through which mcpt can communicate with Minecraft.
 
+![Alt text](screen.png)
+
 ## Usage
 
 To run mcpt, use the following command:
